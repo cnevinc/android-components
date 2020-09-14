@@ -14,6 +14,7 @@ import android.content.pm.ResolveInfo
 import android.net.Uri
 import android.os.SystemClock
 import android.provider.Browser.EXTRA_APPLICATION_ID
+import android.util.Log
 import androidx.annotation.VisibleForTesting
 import mozilla.components.support.base.log.logger.Logger
 import mozilla.components.support.ktx.android.content.pm.isPackageInstalled
@@ -50,12 +51,22 @@ class AppLinksUseCases(
 ) {
     @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
     internal fun findActivities(intent: Intent): List<ResolveInfo> {
-        return context.packageManager
-            .queryIntentActivities(intent, PackageManager.GET_RESOLVED_FILTER) ?: emptyList()
+        val list = measure("findActivities") {
+            context.packageManager
+                .queryIntentActivities(intent, PackageManager.GET_RESOLVED_FILTER) ?: emptyList()
+        }
+        return list
     }
 
     private fun findDefaultActivity(intent: Intent): ResolveInfo? {
-        return context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        val resolveActivity =
+            measure("findDefaultActivity") {
+                context.packageManager.resolveActivity(
+                    intent,
+                    PackageManager.MATCH_DEFAULT_ONLY
+                )
+            }
+        return resolveActivity
     }
 
     private fun safeParseUri(uri: String, flags: Int): Intent? {
@@ -64,6 +75,15 @@ class AppLinksUseCases(
         } catch (e: URISyntaxException) {
             null
         }
+    }
+
+    fun <T> measure(tag: String, target: () -> T): T {
+        val start = SystemClock.elapsedRealtime()
+        val result: T = target()
+        val end = SystemClock.elapsedRealtime()
+        Log.e("lol", "measure:$tag")
+        Log.e("lol", "average ${end - start}")
+        return result
     }
 
     /**
@@ -96,6 +116,7 @@ class AppLinksUseCases(
             }
 
             val redirectData = createBrowsableIntents(url)
+
             val isAppIntentHttpOrHttps = redirectData.appIntent?.data?.isHttpOrHttps ?: false
             val isEngineSupportedScheme = ENGINE_SUPPORTED_SCHEMES.contains(Uri.parse(url).scheme)
 
@@ -131,9 +152,14 @@ class AppLinksUseCases(
             }
 
             val marketplaceIntent = intent?.`package`?.let {
-                if (includeInstallAppFallback &&
-                        !context.packageManager.isPackageInstalled(it)) {
-                    Intent.parseUri(MARKET_INTENT_URI_PACKAGE_PREFIX + it, 0)
+                if (includeInstallAppFallback) {
+                    measure("includeInstallAppFallback") {
+                        if (!context.packageManager.isPackageInstalled(it)) {
+                            Intent.parseUri(MARKET_INTENT_URI_PACKAGE_PREFIX + it, 0)
+                        } else {
+                            null
+                        }
+                    }
                 } else {
                     null
                 }
