@@ -85,7 +85,10 @@ class AppLinksUseCases(
         private val ignoreDefaultBrowser: Boolean = false,
         private val includeInstallAppFallback: Boolean = false
     ) {
-        operator fun invoke(url: String): AppLinkRedirect {
+        operator fun invoke(
+            url: String,
+            action: ((intent: Intent?) -> Unit)? = null
+        ): AppLinkRedirect {
             val urlHash = (url + includeHttpAppLinks + ignoreDefaultBrowser + includeHttpAppLinks).hashCode()
             val currentTimeStamp = SystemClock.elapsedRealtime()
             // since redirectCache is mutable, get the latest
@@ -95,7 +98,7 @@ class AppLinksUseCases(
                 return cache.cachedAppLinkRedirect
             }
 
-            val redirectData = createBrowsableIntents(url)
+            val redirectData = createBrowsableIntents(url, action)
             val isAppIntentHttpOrHttps = redirectData.appIntent?.data?.isHttpOrHttps ?: false
             val isEngineSupportedScheme = ENGINE_SUPPORTED_SCHEMES.contains(Uri.parse(url).scheme)
 
@@ -124,7 +127,10 @@ class AppLinksUseCases(
         private fun isDefaultBrowser(intent: Intent) =
             findDefaultActivity(intent)?.activityInfo?.packageName == context.packageName
 
-        private fun createBrowsableIntents(url: String): RedirectData {
+        private fun createBrowsableIntents(
+            url: String,
+            openAppLinkAction: ((intent: Intent?) -> Unit)?
+        ): RedirectData {
             val intent = safeParseUri(url, Intent.URI_INTENT_SCHEME)
             val fallbackIntent = intent?.getStringExtra(EXTRA_BROWSER_FALLBACK_URL)?.let {
                 Intent.parseUri(it, 0)
@@ -143,6 +149,15 @@ class AppLinksUseCases(
                 marketplaceIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             }
 
+            Thread{
+                openAppLinkAction?.invoke(tryGetAppIntent(fallbackIntent))
+            }.start()
+
+
+            return RedirectData(null, fallbackIntent, marketplaceIntent, null)
+        }
+
+        private fun tryGetAppIntent(intent: Intent?): Intent? {
             val appIntent = when {
                 intent?.data == null -> null
                 alwaysDeniedSchemes.contains(intent.data?.scheme) -> null
@@ -172,8 +187,7 @@ class AppLinksUseCases(
                     appIntent.component = ComponentName(it.activityInfo.packageName, it.activityInfo.name)
                 }
             }
-
-            return RedirectData(appIntent, fallbackIntent, marketplaceIntent, resolveInfo)
+            return appIntent
         }
     }
 
